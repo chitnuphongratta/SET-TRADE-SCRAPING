@@ -1,0 +1,79 @@
+#Library
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from io import StringIO
+import pandas as pd
+import time
+
+start_time = time.time()
+
+# Set up Chrome options
+options = Options()
+options.add_argument("--headless")  # Run without opening browser window
+options.add_argument("--disable-gpu")
+options.add_argument("--window-size=1920x1080")
+
+# Set path to ChromeDriver. You have to download the ChromeDriver which is matched with your current version of Chrome and your OS.
+chrome_driver_path = "D:/chromedriver-win64/chromedriver-win64/chromedriver.exe"
+service = Service(chrome_driver_path)
+
+# Import CSV with symbols
+symbol_df = pd.read_csv("D:/symbolstock.csv")
+symbols = symbol_df.iloc[:, 0].tolist()  # assumes first column has the symbols
+
+# Prepare result container
+results = []
+
+# Start browser session
+driver = webdriver.Chrome(service=service, options=options)
+
+for symbol in symbols:
+    try:
+        url = f"https://www.set.or.th/en/market/product/stock/quote/{symbol}/financial-statement/company-highlights"
+        driver.get(url)
+
+        # Wait for table to load
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, 'table'))
+        )
+
+        # Get HTML and parse tables
+        html = driver.page_source
+        tables = pd.read_html(StringIO(html))
+
+        if len(tables) > 0:
+            table = tables[0]
+
+            # To ensure that the table has enough rows and columns
+            if table.shape[0] >= 6 and table.shape[1] >= 5:
+                assets = table.iloc[1, 4]  # row 2 (index 1), column 5 (index 4)
+                revenue = table.iloc[5, 4]  # row 6 (index 5), column 5 (index 4)
+
+                results.append({"Symbol": symbol, "Assets": assets, "Revenue": revenue})
+                # If there are flaws or errors occured, this is to skip the normal table one and create only a table for the abnormal table data.
+                # print(f"{symbol} is normal. Skipped!")
+            else:
+                print(f"⚠️ Table for {symbol} doesn't have enough data or not in the size.")
+                results.append({"Symbol": symbol, "Assets": table.iloc[1,table.shape[1]-2], "Revenue":  table.iloc[5,table.shape[1]-2]})
+        else:
+            print(f"⚠️ No tables found for {symbol}")
+            results.append({"Symbol": symbol, "Assets": "-", "Revenue":  "-"})
+
+        time.sleep(1)  # polite delay
+    except Exception as e:
+        print(f"❌ Error processing {symbol}: {e}")
+   
+# Quit browser
+driver.quit()
+
+# Convert results to DataFrame
+result_df = pd.DataFrame(results)
+result_df.to_csv("financial_data_summary.csv", index=False)
+print("\n✅ All data collected and saved to 'financial_data_summary.csv'")
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f"\n⏱️ Total execution time: {elapsed_time:.2f} seconds")
